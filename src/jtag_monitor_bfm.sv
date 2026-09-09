@@ -1,10 +1,12 @@
 // Monitor BFM: independently reconstructs observed protocol activity from
 // pins and never drives bus pins (docs/architecture.md, "BFM contracts
-// and ownership"). Publishes completed scans and reset events into a
+// and ownership"). A plain interface with no proxy logic of its own;
+// src/classes/proxy/jtag_monitor_proxy.svh is the only class permitted to
+// call these tasks. Publishes completed scans and reset events into a
 // bounded mailbox; overflow raises an error rather than silently dropping
 // activity (docs/architecture.md, "Observation buffering").
 interface jtag_monitor_bfm
-  import jtag_pkg::*;
+  import jtag_types_pkg::*;
 (
   jtag_if.monitor_mp vif
 );
@@ -24,7 +26,7 @@ interface jtag_monitor_bfm
              OBS_QUEUE_DEPTH);
   endtask
 
-  task automatic bfm_get_observation(output jtag_observation_s obs);
+  task automatic get_observation(output jtag_observation_s obs);
     obs_q.get(obs);
   endtask
 
@@ -81,15 +83,4 @@ interface jtag_monitor_bfm
       cur_state = nxt;
     end
   end
-
-  class monitor_proxy_impl extends jtag_base_monitor_proxy;
-    task get_observation(output jtag_observation_s obs);
-      bfm_get_observation(obs);
-    endtask
-  endclass
-
-  function jtag_base_monitor_proxy get_proxy();
-    monitor_proxy_impl impl = new();
-    return impl;
-  endfunction
 endinterface

@@ -32,34 +32,38 @@ jtag_agent
       analysis port --> environment subscribers/checkers/coverage
 ```
 
-The arrows describe communication, not inheritance. Driver and monitor proxy handles are typed as separate abstract base classes. Their concrete implementations inherit those bases.
+The arrows describe communication, not inheritance. Driver and monitor proxy handles are typed as separate abstract base classes. Their concrete implementations inherit those bases and are the only classes that hold a handle to a BFM; no UVM component (driver, monitor, agent, or their bases) ever references a BFM directly.
 
 ## Responsibilities
 
 | Element | Responsibility |
 | --- | --- |
 | `jtag_if` | Declare common TCK, TMS, TDI, TDO and optional-reset connectivity; define appropriate signal-access views and timing constructs. |
-| Driver BFM | Own controller-side pin driving and timing; execute requested operations and return sampled TDO data. |
-| Monitor BFM | Observe pins independently; report actual protocol activity, reset, and interrupted operations. Never drive bus pins. |
-| Driver proxy base | Define the abstract callable contract used by the UVM driver. |
-| Monitor proxy base | Define the abstract observation contract used by the UVM monitor. |
-| Concrete proxies | Adapt abstract calls to the corresponding BFM instance. |
-| `jtag_driver` | Consume sequence items, invoke the driver proxy, and complete the UVM request/response handshake. |
-| `jtag_monitor` | Obtain observations through the monitor proxy and publish monitor transactions through an analysis port. |
+| Driver BFM | Own controller-side pin driving and timing; execute requested operations and return sampled TDO data. Framework-agnostic: imports only the shared types package, not the UVM-facing package. |
+| Monitor BFM | Observe pins independently; report actual protocol activity, reset, and interrupted operations. Never drive bus pins. Framework-agnostic, same as the driver BFM. |
+| Driver proxy base | Define the abstract, generic `drive_txn(jtag_item txn)` contract used by `jtag_base_driver`. |
+| Monitor proxy base | Define the abstract, generic `monitor_txn(output jtag_item txn)` contract used by `jtag_base_monitor`. |
+| Concrete proxies | Hold a virtual-interface handle to the corresponding BFM (passed as a constructor argument) and translate `jtag_item` to/from that BFM's calls. The only classes permitted to reference a BFM; extend cleanly for DUT- or instance-specific behavior without touching the BFM or any UVM component. |
+| `jtag_base_driver` | Retrieve `jtag_agent_config`, validate and hold the driver proxy handle. |
+| `jtag_driver` | Consume sequence items, invoke `proxy.drive_txn()`, and complete the UVM request/response handshake. |
+| `jtag_base_monitor` | Retrieve `jtag_agent_config`, validate and hold the monitor proxy handle. |
+| `jtag_monitor` | Obtain observations through `proxy.monitor_txn()` and publish them through an analysis port. |
 | `jtag_sequencer` | Arbitrate sequence requests for the driver. |
 | `jtag_agent_config` | Hold per-instance settings and proxy handles. |
 | `jtag_agent` | Build and connect components; enable driver/sequencer only in active mode. |
 | Shared package(s) | Define common enums, data types, abstract contracts, and UVM classes in an explicit dependency order. |
 
-The BFMs receive the common `jtag_if` instance through an interface port. A proposed implementation uses separate BFM interfaces, each containing a concrete proxy implementation that calls its enclosing BFM's tasks. Confirm simulator acceptance with a minimal compile test before building the full UVC.
+The BFMs receive the common `jtag_if` instance through an interface port. Each BFM interface is a plain interface with no proxy logic of its own: it exposes operation-level tasks (reset, scan) and nothing else. A concrete proxy class is constructed separately, taking a virtual handle to its BFM as a constructor argument, and is the sole caller of that BFM's tasks. This keeps the BFM interfaces free of any UVM/proxy-package dependency (see "Parameters, packages, and runtime configuration") and lets a DUT- or instance-specific variant be written as a proxy subclass with its own constructor parameters, without editing the BFM or any UVM component. Confirm simulator acceptance with a minimal compile test before building the full UVC.
 
 ## Base-class policy
 
-Use project-specific bases for the agreed extension points: agent, driver, monitor, sequencer, sequence item, sequence, and the two proxy contracts. Component bases inherit the appropriate UVM classes; concrete implementations inherit the project bases. Parameterization required by standard UVM APIs, such as `uvm_driver #(jtag_item)`, remains normal and acceptable.
+Use project-specific bases for the agreed extension points: agent, driver, monitor, sequencer, sequence item, sequence, and the two proxy contracts. Component bases inherit the appropriate UVM classes; concrete implementations inherit the project bases. Parameterization required by standard UVM APIs, such as `uvm_driver #(jtag_item)`, remains normal and acceptable. These base classes live under a dedicated `base/` source directory (with the two proxy bases under `base/proxy/`), separate from their concrete implementations, so the extension points are easy to find as a group.
+
+Common, non-DUT-specific behavior belongs in the base class, not the concrete one: `jtag_base_driver` and `jtag_base_monitor` each retrieve `jtag_agent_config` and validate/store the corresponding proxy handle, so `jtag_driver` and `jtag_monitor` only implement `run_phase` against the inherited proxy. Neither the base nor the concrete component class ever holds a BFM handle; only a concrete proxy does.
 
 Keep the hierarchy shallow. Base classes should define useful contracts or shared behavior. Configuration and simple data objects can inherit directly from `uvm_object`; whether they also require project-specific bases is an open naming/extension policy decision.
 
-Separate driver and monitor proxy contracts normally require two abstract classes and two concrete implementations. No additional forwarding-wrapper layer is intended.
+Separate driver and monitor proxy contracts normally require two abstract classes and two concrete implementations. No additional forwarding-wrapper layer is intended. A sequence-library convenience base (for example, a shared base for the IR/DR scan sequences) is not one of these seven extension points and does not need to live under `base/`; it is ordinary reuse within the sequence library.
 
 ## Parameters, packages, and runtime configuration
 
@@ -79,21 +83,23 @@ For basic serial JTAG, scan length does not change pin widths. Start with an unp
 
 A package supplies shared declarations and constants; it is not instantiated with per-agent parameter overrides. Putting an instance-specific IR width into a single package constant would couple agents that need different widths. Package organization and proxy abstraction solve different problems and should be used together.
 
+Splitting the shared enums/structs into their own dependency-free package (`jtag_types_pkg`), separate from the UVM-facing package (`jtag_pkg`), is deliberate rather than incidental: the BFM interfaces only need the shared types, while the UVM-facing package's concrete proxies need the BFM interface types (for their virtual-interface constructor argument). Folding everything into one package would make the package need the BFM and the BFM need the package at the same time, which no single compile order can satisfy. `jtag_pkg` re-exports `jtag_types_pkg`, so other code only ever imports `jtag_pkg`.
+
 ## BFM contracts and ownership
 
 Prefer operation-level driver calls initially: request a scan or reset operation and receive its result. This reduces calls across the proxy boundary compared with invoking a method for every bit. The driver BFM therefore owns the pin-level execution and the TAP navigation needed for these operations.
 
 The monitor BFM independently reconstructs observed protocol activity from pins. The UVM monitor publishes the resulting observations. It must report reset and interrupted scans as well as completed scans; reporting only successful completion would hide important behavior.
 
-Exact APIs remain open. They must define blocking behavior, buffer ownership, completion status, reset interruption, legal end states, and cancellation. A future cycle-level diagnostic API can be added if justified without making it the default transaction path.
+The abstract proxy contracts are generic rather than operation-specific: `jtag_base_driver_proxy` exposes a single `drive_txn(jtag_item txn)`, and `jtag_base_monitor_proxy` exposes a single `monitor_txn(output jtag_item txn)`. Because `jtag_item` is a class handle, `drive_txn` fills in the response fields (captured data, status) directly on the object it is given; there is no separate response type at the proxy boundary. A concrete proxy is free to dispatch internally on the transaction's operation kind (reset vs. scan) and translate to whatever request/response shape its BFM expects — the current driver BFM uses small structs for that internal, BFM-local boundary — but that shape is not part of the abstract contract. Blocking behavior, buffer ownership, reset interruption, legal end states, and cancellation are defined by the concrete proxy/BFM pair; a future cycle-level diagnostic API can be added if justified without making it the default transaction path.
 
 The driver owns its predicted state for generating traffic. The monitor owns a separate observed state. Shared type definitions are appropriate; sharing the driver's mutable state or intended transactions as the monitor's source of truth is not.
 
 ## Instance binding and startup
 
 1. The testbench top instantiates the common interface, BFMs, and DUT connections.
-2. Each BFM supplies a concrete proxy associated with that BFM instance.
-3. Testbench setup places abstract proxy handles in the corresponding agent configuration.
+2. Testbench setup constructs a concrete proxy per BFM instance, passing that BFM's virtual-interface handle as a constructor argument.
+3. Testbench setup places the resulting abstract-typed proxy handles in the corresponding agent configuration.
 4. Configuration is published before UVM build retrieves it and before traffic starts.
 5. The agent validates the required handles and settings; missing connections cause a clear fatal configuration error.
 
@@ -123,6 +129,7 @@ Use explicit per-instance binding rather than a global singleton or broad factor
 | Four-state observations | Preserve X/Z information where meaningful; do not silently coerce observed pins into two-state data. |
 | Static parameterization | Proxies hide specialized types; they do not remove elaboration-time requirements. |
 | Emulation | This architecture alone does not establish synthesizability or emulation compatibility. |
+| Two-package split | `jtag_types_pkg` and `jtag_pkg` add one more file to the compile order; justified by resolving an otherwise circular dependency between the BFM interfaces and the UVM-facing package's concrete proxies. |
 
 No compile-time, memory, or simulator-speed improvement has been measured. Logging, waveform dumping, per-cycle work, and allocation patterns may matter more than the small number of proxy objects.
 
@@ -153,13 +160,13 @@ Compilation success is not protocol verification. No implementation or simulatio
 
 ## Decisions still to settle
 
-- Exact driver and monitor proxy method signatures and data ownership.
+- The abstract proxy contract is now `drive_txn(jtag_item txn)` / `monitor_txn(output jtag_item txn)`, generic across operation kinds. Still open: whether a DUT- or instance-specific proxy variant should subclass the generic concrete proxy (reusing its BFM handle, which is `protected` for this purpose) or extend the abstract base directly for a differently shaped BFM, and what additional constructor parameters (for example IR length, chain position) such a variant should standardize on.
 - Reset support: TMS reset, optional TRST, and interruption semantics.
 - Supported TAP chains and the representation of chain/device configuration.
 - TCK ownership, idle behavior, and exact drive/sample timing.
 - Monitor event types, buffering, and recovery after unknown or interrupted activity.
 - Project-specific base requirements for configuration and observation classes.
-- Package/file dependency order and minimal simulator portability checks.
+- The `jtag_types_pkg` / `jtag_pkg` / BFM interface compile order (see "Parameters, packages, and runtime configuration") is fixed on paper but not yet confirmed against a real simulator; treat it, and the constructor-based virtual-interface binding it enables, as unverified until compiled.
 
 ## References
 

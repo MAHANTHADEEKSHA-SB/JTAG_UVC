@@ -1,10 +1,10 @@
 // Driver BFM: owns controller-side pin driving, TCK generation, TAP
 // navigation, and operation-level scan/reset execution
-// (docs/architecture.md, "BFM contracts and ownership"). Exposes a
-// concrete jtag_base_driver_proxy implementation as a nested class that
-// calls this interface's own tasks directly.
+// (docs/architecture.md, "BFM contracts and ownership"). A plain
+// interface with no proxy logic of its own; src/classes/proxy/jtag_driver_proxy.svh
+// is the only class permitted to call these tasks.
 interface jtag_driver_bfm
-  import jtag_pkg::*;
+  import jtag_types_pkg::*;
 (
   jtag_if.driver_mp vif
 );
@@ -42,7 +42,7 @@ interface jtag_driver_bfm
     foreach (tms_path[i]) pulse_tck(tms_path[i], 1'b0, unused_tdo);
   endtask
 
-  task automatic bfm_apply_reset(jtag_reset_kind_e kind, int unsigned cycles);
+  task automatic apply_reset(jtag_reset_kind_e kind, int unsigned cycles);
     bit unused_tdo;
     case (kind)
       JTAG_RESET_TMS: begin
@@ -62,7 +62,7 @@ interface jtag_driver_bfm
   // Operation-level scan: navigate to SHIFT_IR/SHIFT_DR, shift `length`
   // bits (last bit's TMS=1 exits to EXIT1_*), then navigate to
   // req.end_state.
-  task automatic bfm_do_scan(input jtag_scan_req_s req, output jtag_scan_rsp_s rsp);
+  task automatic do_scan(input jtag_scan_req_s req, output jtag_scan_rsp_s rsp);
     jtag_tap_state_e shift_state;
     bit              tms_path[$];
     bit              tdo_bit;
@@ -86,19 +86,4 @@ interface jtag_driver_bfm
     jtag_tap_compute_path(cur_state, req.end_state, tms_path);
     walk_path(tms_path);
   endtask
-
-  class driver_proxy_impl extends jtag_base_driver_proxy;
-    task reset(jtag_reset_kind_e kind, int unsigned cycles);
-      bfm_apply_reset(kind, cycles);
-    endtask
-
-    task do_scan(jtag_scan_req_s req, output jtag_scan_rsp_s rsp);
-      bfm_do_scan(req, rsp);
-    endtask
-  endclass
-
-  function jtag_base_driver_proxy get_proxy();
-    driver_proxy_impl impl = new();
-    return impl;
-  endfunction
 endinterface

@@ -16,11 +16,16 @@ module jtag_min_compile_tb;
   jtag_tap_stub    dut     (.jtag(dut_if.dut_mp));
 
   initial begin
-    jtag_agent_config cfg = jtag_agent_config::type_id::create("cfg");
-    cfg.is_active     = UVM_ACTIVE;
-    cfg.tck_period    = 100ns;
-    cfg.driver_proxy  = drv_bfm.get_proxy();
-    cfg.monitor_proxy = mon_bfm.get_proxy();
+    jtag_agent_config  cfg       = jtag_agent_config::type_id::create("cfg");
+    jtag_driver_proxy  drv_proxy = new(drv_bfm);
+    jtag_monitor_proxy mon_proxy = new(mon_bfm);
+
+    cfg.is_active  = UVM_ACTIVE;
+    cfg.tck_period = 100ns;
+
+    drv_bfm.configure(cfg.tck_period);
+    cfg.driver_proxy  = drv_proxy;
+    cfg.monitor_proxy = mon_proxy;
 
     uvm_config_db#(jtag_agent_config)::set(null, "*", "cfg", cfg);
 
