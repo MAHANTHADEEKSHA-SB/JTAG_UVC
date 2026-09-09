@@ -1084,7 +1084,7 @@ html&gt;body{padding:0}&lt;/style&gt;
  function txt(x,y,s,cls=&#x27;label&#x27;,anchor=&#x27;middle&#x27;){const e=el(&#x27;text&#x27;,{x,y,class:cls,&#x27;text-anchor&#x27;:anchor});e.textContent=s;return e;}
  function draw(){
   svg.replaceChildren();const w=Math.max(300,root.getBoundingClientRect().width),h=884,nw=Math.min(150,w*.29),hh=36;
-  svg.setAttribute(&#x27;viewBox&#x27;,`0 0 ${w} ${h}`);svg.style.height=h+&#x27;px&#x27;;
+  svg.setAttribute(&#x27;viewBox&#x27;,`0 -14 ${w} ${h+14}`);svg.style.height=h+&#x27;px&#x27;;
   const d=w*.25,i=w*.75,c=w*.5,half=nw/2;
   const defs=el(&#x27;defs&#x27;,{});for(const [id,color] of [[&#x27;arrow&#x27;,&#x27;var(--muted-foreground)&#x27;],[&#x27;active-arrow&#x27;,&#x27;var(--viz-series-1)&#x27;]]){const m=el(&#x27;marker&#x27;,{id:&#x27;tap-&#x27;+id,viewBox:&#x27;0 0 10 10&#x27;,refX:9,refY:5,markerWidth:6,markerHeight:6,orient:&#x27;auto&#x27;},defs);el(&#x27;path&#x27;,{d:&#x27;M 0 0 L 10 5 L 0 10 z&#x27;,fill:color},m);}
   const p={RESET:[c,38],IDLE:[d,112],SDR:[d,208],SIR:[i,208]};
@@ -1146,6 +1146,7 @@ html&gt;body{padding:0}&lt;/style&gt;
  new ResizeObserver(draw).observe(root);draw();
 })();
 &lt;/script&gt;
+
 
 &lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
 &lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
