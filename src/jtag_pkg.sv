@@ -15,6 +15,41 @@ package jtag_pkg;
   import jtag_types_pkg::*;
   export jtag_types_pkg::*;
 
+  // Forward declarations for every class in this package, so a field,
+  // pure-virtual argument, or other bare type reference never depends on
+  // `include order below.
+  //
+  // This does NOT relax `extends`: a derived class still requires its
+  // base class's full body to already be compiled, and any method body
+  // that touches another class's members still requires that class to be
+  // fully defined first. The `include order below still walks each
+  // inheritance chain base-before-derived (jtag_base_sequence_item before
+  // jtag_item, jtag_base_driver_proxy before jtag_driver_proxy before
+  // jtag_master_driver_proxy, and so on) for that reason; only the
+  // "declared as a plain handle/type" references are order-independent.
+  typedef class jtag_item;
+  typedef class jtag_base_driver_proxy;
+  typedef class jtag_base_monitor_proxy;
+  typedef class jtag_agent_config;
+  typedef class jtag_base_sequence_item;
+  typedef class jtag_base_sequence;
+  typedef class jtag_base_driver;
+  typedef class jtag_base_monitor;
+  typedef class jtag_base_sequencer;
+  typedef class jtag_base_agent;
+  typedef class jtag_driver_proxy;
+  typedef class jtag_monitor_proxy;
+  typedef class jtag_master_driver_proxy;
+  typedef class jtag_master_monitor_proxy;
+  typedef class jtag_base_scan_sequence;
+  typedef class jtag_reset_sequence;
+  typedef class jtag_ir_scan_sequence;
+  typedef class jtag_dr_scan_sequence;
+  typedef class jtag_driver;
+  typedef class jtag_monitor;
+  typedef class jtag_sequencer;
+  typedef class jtag_agent;
+
   // Sequence item (needed by name in the base classes below).
   `include "classes/base/jtag_base_sequence_item.svh"
   `include "classes/jtag_item.svh"
