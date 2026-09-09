@@ -1,0 +1,8 @@
++incdir+src
++incdir+tb
+src/jtag_if.sv
+src/jtag_pkg.sv
+src/jtag_driver_bfm.sv
+src/jtag_monitor_bfm.sv
+tb/dut/jtag_tap_stub.sv
+tb/jtag_min_compile_tb.sv
