@@ -4,6 +4,12 @@ A planned reusable SystemVerilog/UVM JTAG verification component using separate 
 
 ## Architecture
 
+![JTAG TAP controller state machine](docs/tap-controller/tap-state-machine.png)
+
+[Interactive TAP controller](docs/tap-controller/index.html) — download and open in a browser; GitHub file view shows source. GitHub Pages deployment is not configured by this check-in.
+
+[Scaffold review](docs/review-2026-09-10.md) · [DVCon reference paper](docs/references/working-within-the-parameters.pdf)
+
 See [Architecture and advantages](docs/architecture.md) for the proposed structure, responsibilities, benefits, trade-offs, and open decisions.
 
 Status: initial implementation scaffold generated from the architecture proposal. No simulation results are included yet; several proxy/timing details are first-draft and still need validation. Initial simulation is planned on EDA Playground with UVM 1.2 and a compatible simulator.

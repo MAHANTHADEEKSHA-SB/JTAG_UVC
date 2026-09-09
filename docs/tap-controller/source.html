@@ -1,0 +1,112 @@
+<div id="tap-explorer">
+  <h2>JTAG · TAP controller</h2>
+  <div class="viz-row text-small"><span>16 states</span><span>·</span><span>Arrow labels = TMS at TCK ↑</span></div>
+  <div class="viz-controls">
+    <label class="form-label">Guided sequence<select class="form-select" id="tap-preset"><option value="dr">4-bit DR scan</option><option value="ir">4-bit IR scan</option><option value="pause">DR pause and resume</option><option value="reset">Reset from current state</option><option value="custom">Custom TMS sequence</option></select></label>
+    <label class="form-label">TMS bits · left to right<input class="form-control" id="tap-bits" value="11111 0 100 0001 10" aria-label="TMS sequence" maxlength="256" /></label>
+  </div>
+  <div class="viz-controls"><button class="btn btn-primary" id="tap-play" type="button">Play sequence</button><button class="btn" id="tap-next" type="button">Next bit</button><button class="btn" id="tap-stop" type="button">Pause playback</button></div>
+  <div class="viz-controls">
+    <button class="btn" type="button" id="tap-zero">Clock TMS = 0</button>
+    <button class="btn" type="button" id="tap-one">Clock TMS = 1</button>
+    <button class="btn" type="button" id="tap-reset">TMS reset · 5 clocks</button>
+  </div>
+  <div id="tap-status" class="text-small" aria-live="polite"></div>
+  <div id="tap-progress" class="text-small"></div>
+  <svg id="tap-graph" role="img" aria-label="Complete JTAG TAP state machine. Two parallel paths for data and instruction registers. Each state has a transition for TMS zero and one."></svg>
+  <div id="tap-detail" class="text-small" aria-live="polite"></div>
+</div>
+<style>
+ #tap-explorer { color:var(--foreground); }
+ #tap-explorer #tap-graph {display:block;width:100%;overflow:visible;background:#080e22;--background:#080e22;--foreground:#f4f8ff;--muted-foreground:#849bbd;--viz-series-1:#b7ff32;--viz-series-2:#00d9ff;--viz-series-3:#af65ff;}
+ #tap-explorer .wire {fill:none;stroke:#849bbd;stroke-width:1.5;}
+ #tap-explorer .wire.hot {stroke:#b7ff32;stroke-width:3;filter:drop-shadow(0 0 4px #b7ff3280);}
+ #tap-explorer .node {fill:#183158;stroke:#6c89b0;stroke-width:1.2;}
+ #tap-explorer .node.dr {fill:#00768e;stroke:#00e1ff;}
+ #tap-explorer .node.ir {fill:#7133b7;stroke:#c28bff;}
+ #tap-explorer .node.control {fill:#b13c21;stroke:#ff9160;}
+ #tap-explorer .node.active {fill:#b7ff32;stroke:#eaffb8;stroke-width:3;filter:drop-shadow(0 0 7px #b7ff3266);}
+ #tap-explorer .node.active + .label {fill:#142300;}
+ #tap-explorer .label {fill:#f4f8ff;font-size:12px;font-weight:500;}
+ #tap-explorer .edge-label {fill:#ffda67;font-size:12px;paint-order:stroke;stroke:#080e22;stroke-width:5;stroke-linejoin:round;}
+ #tap-explorer .lane {fill:#00d9ff;opacity:.10;}
+ #tap-explorer .lane.ir {fill:#af65ff;opacity:.14;}
+ #tap-explorer .portal {fill:#111e36;stroke:#849bbd;stroke-dasharray:3 3;}
+ #tap-explorer #tap-progress {overflow-wrap:anywhere;min-height:24px;}
+</style>
+<script>
+(() => {
+ const root=document.getElementById('tap-explorer'), svg=root.querySelector('#tap-graph');
+ const next={RESET:['IDLE','RESET'],IDLE:['IDLE','SDR'],SDR:['CDR','SIR'],SIR:['CIR','RESET'],CDR:['SHDR','E1DR'],SHDR:['SHDR','E1DR'],E1DR:['PDR','UDR'],PDR:['PDR','E2DR'],E2DR:['SHDR','UDR'],UDR:['IDLE','SDR'],CIR:['SHIR','E1IR'],SHIR:['SHIR','E1IR'],E1IR:['PIR','UIR'],PIR:['PIR','E2IR'],E2IR:['SHIR','UIR'],UIR:['IDLE','SDR']};
+ const names={RESET:'Test-Logic-Reset',IDLE:'Run-Test / Idle',SDR:'Select-DR-Scan',SIR:'Select-IR-Scan',CDR:'Capture-DR',SHDR:'Shift-DR',E1DR:'Exit1-DR',PDR:'Pause-DR',E2DR:'Exit2-DR',UDR:'Update-DR',CIR:'Capture-IR',SHIR:'Shift-IR',E1IR:'Exit1-IR',PIR:'Pause-IR',E2IR:'Exit2-IR',UIR:'Update-IR'};
+ let current='RESET',last=null,clocks=0,timer=null,cursor=0,sequence='',action='Ready. All guided scans begin with five reset clocks.';
+ const bits=root.querySelector('#tap-bits'),preset=root.querySelector('#tap-preset');
+ const presets={dr:'11111 0 100 0001 10',ir:'11111 0 1100 0001 10',pause:'11111 0 100 01 00 10 01 10',reset:'11111'};
+ const ns='http://www.w3.org/2000/svg';
+ function el(tag,attrs,parent=svg){const e=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));parent.appendChild(e);return e;}
+ function txt(x,y,s,cls='label',anchor='middle'){const e=el('text',{x,y,class:cls,'text-anchor':anchor});e.textContent=s;return e;}
+ function draw(){
+  svg.replaceChildren();const w=Math.max(300,root.getBoundingClientRect().width),h=884,nw=Math.min(150,w*.29),hh=36;
+  svg.setAttribute('viewBox',`0 -14 ${w} ${h+14}`);svg.style.height=h+'px';
+  const d=w*.25,i=w*.75,c=w*.5,half=nw/2;
+  const defs=el('defs',{});for(const [id,color] of [['arrow','var(--muted-foreground)'],['active-arrow','var(--viz-series-1)']]){const m=el('marker',{id:'tap-'+id,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto'},defs);el('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:color},m);}
+  const p={RESET:[c,38],IDLE:[d,112],SDR:[d,208],SIR:[i,208]};
+  const kinds=['C','SH','E1','P','E2','U'];kinds.forEach((k,j)=>{p[k+'DR']=[d,292+j*82];p[k+'IR']=[i,292+j*82];});
+  el('rect',{x:6,y:249,width:w/2-12,height:552,rx:12,class:'lane'});el('rect',{x:w/2+6,y:249,width:w/2-12,height:552,rx:12,class:'lane ir'});
+  txt(d,271,'DATA REGISTER');txt(i,271,'INSTRUCTION REGISTER');
+  function edge(a,b,bit,path,lx,ly){const hot=last&&last[0]===a&&last[1]===bit;el('path',{d:path,class:'wire'+(hot?' hot':''),'marker-end':`url(#tap-${hot?'active-arrow':'arrow'})`});txt(lx,ly,String(bit),'edge-label');if(hot&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches){const dot=el('circle',{r:4,fill:'var(--viz-series-1)'});el('animateMotion',{path,dur:'0.45s',repeatCount:1,fill:'freeze'},dot);}}
+  function down(a,b,bit){const [x,y]=p[a],[xx,yy]=p[b];edge(a,b,bit,`M ${x} ${y+18} L ${xx} ${yy-18}`,x+10,(y+yy)/2+4);}
+  function loop(a,bit,side){
+   const[x,y]=p[a],sx=x+side*half,ox=x+side*(half+28);
+   if(a==='RESET'){
+    edge(a,a,bit,`M ${x+half*.55} ${y-18} V ${y-30} H ${x-half*.55} V ${y-18}`,x,y-31);
+   }else{
+    edge(a,a,bit,`M ${sx} ${y-10} H ${ox- side*5} Q ${ox} ${y-10} ${ox} ${y-5} V ${y+5} Q ${ox} ${y+10} ${ox-side*5} ${y+10} H ${sx}`,ox,y-17);
+   }
+  }
+  edge('RESET','IDLE',0,`M ${c-half} 38 H ${d} V 94`,d+10,72);loop('RESET',1,1);loop('IDLE',0,-1);down('IDLE','SDR',1);
+  edge('SDR','SIR',1,`M ${d+half} 208 H ${i-half}`,c,199);
+  edge('SIR','RESET',1,`M ${i} 190 V 38 H ${c+half}`,i+10,105);
+  for(const suffix of ['DR','IR']){
+   const x=suffix==='DR'?d:i;
+   down('S'+suffix,'C'+suffix,0);down('C'+suffix,'SH'+suffix,0);down('SH'+suffix,'E1'+suffix,1);down('E1'+suffix,'P'+suffix,0);down('P'+suffix,'E2'+suffix,1);down('E2'+suffix,'U'+suffix,1);
+   loop('SH'+suffix,0,1);loop('P'+suffix,0,1);
+   const right=x+half+20,left=x-half-17;
+   edge('C'+suffix,'E1'+suffix,1,`M ${x+half} 292 H ${right} V 456 H ${x+half}`,right-6,330);
+   edge('E1'+suffix,'U'+suffix,1,`M ${x-half} 456 H ${left} V 702 H ${x-half}`,left+9,680);
+   edge('E2'+suffix,'SH'+suffix,0,`M ${x-half} 620 H ${left+7} V 374 H ${x-half}`,left+17,599);
+   edge('U'+suffix,'IDLE',0,`M ${x-25} 720 V 747 H ${x-35} V 766`,x-34,745);
+   edge('U'+suffix,'SDR',1,`M ${x+25} 720 V 741 H ${x+half+17} V 825 H ${x+57}`,x+35,735);
+   el('rect',{x:x-57,y:766,width:114,height:28,rx:14,class:'portal'});txt(x,784,'A · Run-Test / Idle');
+   el('rect',{x:x-57,y:811,width:114,height:28,rx:14,class:'portal'});txt(x,829,'B · Select-DR');
+  }
+  for(const [id,[x,y]] of Object.entries(p)){
+   el('rect',{x:x-half,y:y-18,width:nw,height:hh,rx:8,class:'node '+(id.endsWith('DR')?'dr':id.endsWith('IR')?'ir':'control')+(current===id?' active':'')});txt(x,y+4,names[id]);
+  }
+  txt(d,155,'A','edge-label');txt(d- half-9,212,'B','edge-label');
+  txt(c,862,'A / B: return to the matching state above.');
+  root.querySelector('#tap-status').textContent=`${clocks} TCK edges · Current: ${names[current]}`;
+  root.querySelector('#tap-detail').textContent=action;
+  root.querySelector('#tap-zero').textContent=`TMS 0 → ${names[next[current][0]]}`;
+  root.querySelector('#tap-one').textContent=`TMS 1 → ${names[next[current][1]]}`;
+  root.querySelector('#tap-progress').textContent=sequence?`Sequence ${cursor}/${sequence.length}: ${sequence.slice(0,cursor)} ▸ ${sequence.slice(cursor)}`:'Manual stepping · one click = one rising TCK edge';
+ }
+ function step(bit){const old=current;last=[old,bit];current=next[old][bit];clocks++;action=`${names[old]} → ${names[current]} · TMS ${bit}`;if(old.startsWith('SH'))action+=bit?' · Final bit shifts on this edge.':' · One data bit shifts.';else if(old==='CDR'||old==='CIR')action+=' · Capture edge; this is not the first shift edge.';else if(old==='PDR'||old==='PIR')action+=' · No shifting on this edge.';draw();}
+ function stop(){if(timer!==null)clearTimeout(timer);timer=null;}
+ function load(){const v=bits.value.replace(/\s/g,'');if(!/^[01]+$/.test(v)){stop();root.querySelector('#tap-detail').textContent='Use only 0, 1, and spaces in the TMS sequence.';return false;}if(v!==sequence||cursor>=sequence.length){sequence=v;cursor=0;}return true;}
+ function advance(){if(cursor<sequence.length){const b=Number(sequence[cursor++]);step(b);}return cursor<sequence.length;}
+ function play(){stop();if(!load())return;const tick=()=>{if(advance())timer=setTimeout(tick,750);else timer=null;};tick();}
+ root.querySelector('#tap-play').onclick=play;
+ root.querySelector('#tap-stop').onclick=stop;
+ root.querySelector('#tap-next').onclick=()=>{stop();if(load())advance();};
+ preset.onchange=()=>{stop();if(preset.value!=='custom')bits.value=presets[preset.value];sequence='';cursor=0;draw();};
+ bits.oninput=()=>{stop();preset.value='custom';sequence='';cursor=0;draw();};
+ for(const b of [0,1])root.querySelector(b?'#tap-one':'#tap-zero').onclick=()=>{stop();sequence='';cursor=0;step(b);};
+ root.querySelector('#tap-reset').onclick=()=>{stop();bits.value='11111';preset.value='reset';sequence='';cursor=0;play();};
+ // Verify all 16 states have two legal successors and five high clocks reset every state.
+ if(Object.keys(next).length!==16)throw Error('TAP state count');
+ for(const id of Object.keys(next)){if(next[id].length!==2||next[id].some(s=>!next[s]))throw Error('Invalid transition');let s=id;for(let j=0;j<5;j++)s=next[s][1];if(s!=='RESET')throw Error('Reset property');}
+ new ResizeObserver(draw).observe(root);draw();
+})();
+</script>
+
