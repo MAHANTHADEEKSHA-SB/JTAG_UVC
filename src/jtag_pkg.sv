@@ -40,6 +40,11 @@ package jtag_pkg;
   `include "classes/proxy/jtag_driver_proxy.svh"
   `include "classes/proxy/jtag_monitor_proxy.svh"
 
+  // Role-specific proxies. Master role only for now; a slave role would
+  // add its own proxy/BFM pair alongside these later.
+  `include "classes/proxy/master/jtag_master_driver_proxy.svh"
+  `include "classes/proxy/master/jtag_master_monitor_proxy.svh"
+
   // Sequences.
   `include "classes/seq/jtag_base_scan_sequence.svh"
   `include "classes/seq/jtag_reset_sequence.svh"

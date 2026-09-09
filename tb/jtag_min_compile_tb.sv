@@ -16,9 +16,9 @@ module jtag_min_compile_tb;
   jtag_tap_stub    dut     (.jtag(dut_if.dut_mp));
 
   initial begin
-    jtag_agent_config  cfg       = jtag_agent_config::type_id::create("cfg");
-    jtag_driver_proxy  drv_proxy = new(drv_bfm);
-    jtag_monitor_proxy mon_proxy = new(mon_bfm);
+    jtag_agent_config         cfg       = jtag_agent_config::type_id::create("cfg");
+    jtag_master_driver_proxy  drv_proxy = new(drv_bfm);
+    jtag_master_monitor_proxy mon_proxy = new(mon_bfm);
 
     cfg.is_active  = UVM_ACTIVE;
     cfg.tck_period = 100ns;
